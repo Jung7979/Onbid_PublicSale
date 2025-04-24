@@ -116,7 +116,7 @@ class KamcoAuctionService:
         # 일주일 전 날짜 계산
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
 
-        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        endpoint = f"{self.base_url}/getPublicSaleAnnouncement"
         params = {
             'serviceKey': self.service_key,
             'numOfRows': num_of_rows,
