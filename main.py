@@ -14,29 +14,15 @@ import openpyxl  # openpyxl 모듈 추가
 from openpyxl.styles import Font, PatternFill, Border, Side
 from openpyxl.styles import Alignment
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
+# .env 파일 로드
+load_dotenv()
 
-# config.py가 없는 경우 생성
-def create_config_file():
-    if not os.path.exists('config.py'):
-        with open('config.py', 'w', encoding='utf-8') as f:
-            f.write('# config.py\n\n')
-            f.write('# 공공데이터 포털에서 발급받은 서비스 키\n')
-            f.write('SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"\n')
-        print("config.py 파일이 생성되었습니다.")
-        print("config.py 파일에 서비스 키를 입력한 후 다시 실행해주세요.")
-        sys.exit(1)
-
-# config.py 파일 체크 및 생성
-create_config_file()
-
-try:
-    from config import SERVICE_KEY
-    if SERVICE_KEY == "YOUR_SERVICE_KEY_HERE":
-        print("config.py 파일에 실제 서비스 키를 입력한 후 다시 실행해주세요.")
-        sys.exit(1)
-except ImportError:
-    print("config.py 파일을 찾을 수 없습니다.")
+# 서비스 키 가져오기
+SERVICE_KEY = os.getenv('API_KEY_KAMCO_Decoding')
+if not SERVICE_KEY:
+    print(".env 파일에 API_KEY_KAMCO_Decoding를 설정해주세요.")
     sys.exit(1)
 
 class KamcoAuctionService:
