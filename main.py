@@ -1,0 +1,640 @@
+import requests
+import pandas as pd
+import xml.etree.ElementTree as ET
+from datetime import datetime
+import time
+from tqdm import tqdm
+import os
+import sys
+import math
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import numpy as np
+import openpyxl  # openpyxl 모듈 추가
+from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.styles import Alignment
+from datetime import datetime, timedelta
+
+
+# config.py가 없는 경우 생성
+def create_config_file():
+    if not os.path.exists('config.py'):
+        with open('config.py', 'w', encoding='utf-8') as f:
+            f.write('# config.py\n\n')
+            f.write('# 공공데이터 포털에서 발급받은 서비스 키\n')
+            f.write('SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"\n')
+        print("config.py 파일이 생성되었습니다.")
+        print("config.py 파일에 서비스 키를 입력한 후 다시 실행해주세요.")
+        sys.exit(1)
+
+# config.py 파일 체크 및 생성
+create_config_file()
+
+try:
+    from config import SERVICE_KEY
+    if SERVICE_KEY == "YOUR_SERVICE_KEY_HERE":
+        print("config.py 파일에 실제 서비스 키를 입력한 후 다시 실행해주세요.")
+        sys.exit(1)
+except ImportError:
+    print("config.py 파일을 찾을 수 없습니다.")
+    sys.exit(1)
+
+class KamcoAuctionService:
+    def __init__(self, service_key):
+        self.base_url = "http://openapi.onbid.co.kr/openapi/services/KamcoPblsalThingInquireSvc"
+        self.service_key = service_key
+        self.backup_folder = "backup"
+        self.data_folder = os.path.join(self.backup_folder, "data")
+        
+        # 폴더 생성
+        for folder in [self.backup_folder, self.data_folder]:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+
+    def get_total_count(self, disposal_method='0001'):
+        """
+        전체 데이터 개수 조회
+        """
+        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        params = {
+            'serviceKey': self.service_key,
+            'numOfRows': 1,
+            'pageNo': 1,
+            'DPSL_MTD_CD': disposal_method
+        }
+
+        try:
+            response = requests.get(endpoint, params=params)
+            response.raise_for_status()
+            
+            root = ET.fromstring(response.content)
+            
+            # 결과 코드 확인
+            result_code = root.find('.//resultCode').text
+            if result_code != '00':
+                result_msg = root.find('.//resultMsg').text
+                raise Exception(f"API Error: {result_code} - {result_msg}")
+                
+            total_count = int(root.find('.//totalCount').text)
+            return total_count
+        
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Request failed: {str(e)}")
+        except ET.ParseError as e:
+            raise Exception(f"XML parsing failed: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error occurred: {str(e)}")
+        
+    def get_total_count(self, disposal_method='0001'):
+        """
+        전체 데이터 개수 조회
+        """
+        # 일주일 전 날짜 계산
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
+        
+        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        params = {
+            'serviceKey': self.service_key,
+            'numOfRows': 1,
+            'pageNo': 1,
+            'DPSL_MTD_CD': disposal_method,
+            'PBCT_BEGN_DTM': week_ago  # 일주일 전 날짜 추가
+        }
+
+        try:
+            response = requests.get(endpoint, params=params)
+            response.raise_for_status()
+            
+            root = ET.fromstring(response.content)
+            
+            # 결과 코드 확인
+            result_code = root.find('.//resultCode').text
+            if result_code != '00':
+                result_msg = root.find('.//resultMsg').text
+                raise Exception(f"API Error: {result_code} - {result_msg}")
+                
+            total_count = int(root.find('.//totalCount').text)
+            return total_count
+        
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Request failed: {str(e)}")
+        except ET.ParseError as e:
+            raise Exception(f"XML parsing failed: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error occurred: {str(e)}")
+
+    def get_auction_items(self, num_of_rows=100, page_no=1, disposal_method='0001'):
+        """
+        공매물건 목록 조회
+        """
+        # 일주일 전 날짜 계산
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
+
+        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        params = {
+            'serviceKey': self.service_key,
+            'numOfRows': num_of_rows,
+            'pageNo': page_no,
+            'DPSL_MTD_CD': disposal_method,
+            'PBCT_BEGN_DTM': week_ago  # 일주일 전 날짜 추가
+
+        }
+
+        try:
+            response = requests.get(endpoint, params=params)
+            response.raise_for_status()
+            
+            root = ET.fromstring(response.content)
+            
+            # 결과 코드 확인
+            result_code = root.find('.//resultCode').text
+            if result_code != '00':
+                result_msg = root.find('.//resultMsg').text
+                raise Exception(f"API Error: {result_code} - {result_msg}")
+
+            items = []
+            for item in root.findall('.//item'):
+                item_data = self.get_item_data(item)
+                items.append(item_data)
+                
+            return items
+
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Request failed: {str(e)}")
+        except ET.ParseError as e:
+            raise Exception(f"XML parsing failed: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error occurred: {str(e)}")
+
+    def get_item_data(self, item):
+        """
+        XML 항목에서 모든 데이터 추출하여 한글 필드명으로 변환
+        """
+        # 영문-한글 필드 매핑
+        field_mapping = {
+            'RNUM': '순번',
+            'PLNM_NO': '공고번호',
+            'PBCT_NO': '공매번호',
+            'PBCT_CDTN_NO': '공매조건번호',
+            'CLTR_NO': '물건번호',
+            'CLTR_HSTR_NO': '물건이력번호',
+            'SCRN_GRP_CD': '화면그룹코드',
+            'CTGR_FULL_NM': '용도명',
+            'BID_MNMT_NO': '입찰번호',
+            'CLTR_NM': '물건명',
+            'CLTR_MNMT_NO': '물건관리번호',
+            'LDNM_ADRS': '물건소재지(지번)',
+            'NMRD_ADRS': '물건소재지(도로명)',
+            'LDNM_PNU': '지번PNU',
+            'DPSL_MTD_CD': '처분방식코드',
+            'DPSL_MTD_NM': '처분방식코드명',
+            'BID_MTD_NM': '입찰방식명',
+            'MIN_BID_PRC': '최저입찰가',
+            'APSL_ASES_AVG_AMT': '감정가',
+            'FEE_RATE': '최저입찰가율',
+            'PBCT_BEGN_DTM': '입찰시작일시',
+            'PBCT_CLS_DTM': '입찰마감일시',
+            'PBCT_CLTR_STAT_NM': '물건상태',
+            'USCBD_CNT': '유찰횟수',
+            'IQRY_CNT': '조회수',
+            'GOODS_NM': '물건상세정보',
+            'MANF': '제조사',
+            'MDL': '모델',
+            'NRGT': '연월식',
+            'GRBX': '변속기',
+            'ENDPC': '배기량',
+            'VHCL_MLGE': '주행거리',
+            'FUEL': '연료',
+            'SCRT_NM': '법인명',
+            'TPBZ': '업종',
+            'ITM_NM': '종목명',
+            'MMB_RGT_NM': '회원권명',
+            'CLTR_IMG_FILE': '물건 이미지'
+        }
+
+        # XML 데이터 추출 및 한글 필드명으로 변환
+        data = {}
+        for eng_field, kor_field in field_mapping.items():
+            value = item.find(eng_field)
+            data[kor_field] = value.text if value is not None else ''
+        
+        return data
+
+    def fetch_page_data(self, page_info):
+        """
+        단일 페이지 데이터 수집 (병렬 처리용)
+        """
+        page_no, disposal_method, items_per_page = page_info
+        
+        for attempt in range(3):  # 재시도 횟수
+            try:
+                time.sleep(0.5)  # API 호출 간격
+                items = self.get_auction_items(
+                    num_of_rows=items_per_page,
+                    page_no=page_no,
+                    disposal_method=disposal_method
+                )
+                return items
+            except Exception as e:
+                if attempt == 2:  # 마지막 시도
+                    print(f"\n페이지 {page_no} 처리 실패: {str(e)}")
+                    return []
+                time.sleep(2)  # 재시도 전 대기
+        return []
+
+    def save_data_to_excel(self, items, filename, is_backup=False):
+        """
+        데이터를 엑셀 파일로 저장 (물건관리번호에 하이퍼링크 추가)
+        """
+        if not items:
+            return
+            
+        df = pd.DataFrame(items)
+
+        # 수정된 컬럼 순서 정의 (한글)
+        columns_order = [
+            '순번',
+            '물건관리번호',
+            '용도명',
+            '물건명',
+            '입찰방식명',
+            '감정가',
+            '최저입찰가',
+            '최저입찰가율',
+            '입찰시작일시',
+            '입찰마감일시',
+            '물건상태',
+            '유찰횟수',
+            '조회수',
+            '물건상세정보',
+            '공고번호',
+            '공매번호',
+            '공매조건번호',
+            '물건번호',
+            '물건이력번호',
+            '화면그룹코드',
+            '입찰번호',
+            '물건소재지(지번)',
+            '물건소재지(도로명)',
+            '지번PNU',
+            '처분방식코드',
+            '처분방식코드명',
+            '제조사',
+            '모델',
+            '연월식',
+            '변속기',
+            '배기량',
+            '주행거리',
+            '연료',
+            '법인명',
+            '업종',
+            '종목명',
+            '회원권명',
+            '물건 이미지'
+        ]
+        
+        # 존재하는 컬럼만 선택
+        existing_columns = [col for col in columns_order if col in df.columns]
+        df = df[existing_columns]
+
+        try:
+            # 숫자형 데이터 변환
+            numeric_columns = [
+                '순번', '공고번호', '공매번호', '공매조건번호', '물건번호', '물건이력번호',
+                '최저입찰가', '감정가', '유찰횟수', '조회수',
+                '배기량', '주행거리'
+            ]
+            for col in numeric_columns:
+                if col in df.columns:
+                    try:
+                        # 쉼표 제거 후 숫자로 변환
+                        df[col] = df[col].str.replace(',', '').astype(float)
+                    except:
+                        pass
+
+            # 날짜형 데이터 변환
+            date_columns = ['입찰시작일시', '입찰마감일시']
+            for col in date_columns:
+                if col in df.columns:
+                    try:
+                        df[col] = pd.to_datetime(df[col], format='%Y%m%d%H%M%S')
+                    except:
+                        pass
+
+            # 데이터프레임 형식 처리
+            df['최저입찰가율'] = df['최저입찰가율'].str.extract(r'(\d+)').astype(float) / 100  # (70%) -> 0.70
+
+            # 엑셀 파일 생성
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='공매물건목록')
+                    
+                # 워크시트 가져오기
+                worksheet = writer.sheets['공매물건목록']
+
+                # 표 스타일 설정
+                data_range = worksheet.dimensions
+                table = openpyxl.worksheet.table.Table(
+                    displayName="AuctionTable",
+                    ref=data_range,
+                    tableStyleInfo=openpyxl.worksheet.table.TableStyleInfo(
+                        name="TableStyleMedium4",
+                        showFirstColumn=False,
+                        showLastColumn=False,
+                        showRowStripes=True,
+                        showColumnStripes=False
+                    )
+                )
+                worksheet.add_table(table)
+
+                # 숫자 형식 설정 (천단위 구분)
+                number_format = '#,##0'
+                number_columns = {'감정가': 'F', '최저입찰가': 'G', '유찰횟수': 'L', '조회수': 'M'}
+                for col_name, col_letter in number_columns.items():
+                    for row in range(2, worksheet.max_row + 1):
+                        cell = worksheet[f'{col_letter}{row}']
+                        cell.number_format = number_format
+
+                # 백분율 형식 설정
+                for row in range(2, worksheet.max_row + 1):
+                    cell = worksheet[f'H{row}']  # 최저입찰가율 (H열)
+                    cell.number_format = '0%'
+
+                # 날짜 형식 설정
+                date_format = 'yyyy-mm-dd hh:mm'
+                date_columns = {'입찰시작일시': 'I', '입찰마감일시': 'J'}
+                for col_name, col_letter in date_columns.items():
+                    for row in range(2, worksheet.max_row + 1):
+                        cell = worksheet[f'{col_letter}{row}']
+                        cell.number_format = date_format
+                
+                # 열 너비 자동 조정 및 스타일 설정
+                for idx, column in enumerate(worksheet.columns):
+                    max_length = 0
+                    column = list(column)
+                    
+                    # 헤더 셀 스타일 설정 (1행만 가운데 정렬)
+                    header_cell = column[0]
+                    header_cell.font = openpyxl.styles.Font(bold=True)
+                    header_cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+        
+                
+                    # 열 너비 계산
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                                
+                    actual_width = min((max_length + 2), 50)  # 최대 너비 제한
+                    worksheet.column_dimensions[column[0].column_letter].width = actual_width
+            
+                    
+                    # 최대 너비를 초과하는 경우 해당 열의 데이터 행에만 '셀에 맞춤' 적용
+                    if max_length > 50:
+                        for cell in column[1:]:  # 헤더 제외
+                            cell.alignment = openpyxl.styles.Alignment(
+                                shrink_to_fit=True,  # 셀에 맞춤
+                                vertical='center'     # 수직 중앙 정렬
+                            )
+
+                # 하이퍼링크 추가 - with 문 안으로 이동
+                for row_idx, row in enumerate(df.itertuples(), start=2):
+                    try:
+                        cltr_hstr_no = str(getattr(row, '물건이력번호', ''))
+                        cltr_no = str(getattr(row, '물건번호', ''))
+                        plnm_no = str(getattr(row, '공고번호', ''))
+                        pbct_no = str(getattr(row, '공매번호', ''))
+                        scrn_grp_cd = str(getattr(row, '화면그룹코드', '0001'))
+                        pbct_cdtn_no = str(getattr(row, '공매조건번호', ''))
+                        
+                        url = f'https://www.onbid.co.kr/op/cta/cltrdtl/collateralRealEstateDetail.do?cltrHstrNo={cltr_hstr_no}&cltrNo={cltr_no}&plnmNo={plnm_no}&pbctNo={pbct_no}&scrnGrpCd={scrn_grp_cd}&pbctCdtnNo={pbct_cdtn_no}'
+                        
+                        cell = worksheet.cell(row=row_idx, column=2)  # B열
+                        cell.hyperlink = url
+                        cell.style = 'Hyperlink'
+                    except Exception as e:
+                        pass  # 하이퍼링크 생성 오류 메시지 출력 제거
+
+                # 테두리 설정 - with 문 안으로 이동
+                thin_border = openpyxl.styles.Border(
+                    left=openpyxl.styles.Side(style='thin'),
+                    right=openpyxl.styles.Side(style='thin'),
+                    top=openpyxl.styles.Side(style='thin'),
+                    bottom=openpyxl.styles.Side(style='thin')
+                )
+                
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.border = thin_border
+
+            if not is_backup:
+                pass  # 데이터 저장 완료 메시지 출력 제거
+                
+        except Exception as e:
+            pass  # 파일 저장 오류 메시지 출력 제거
+
+    def process_chunk(self, chunk_data, chunk_number, total_chunks):
+        """
+        데이터 청크 처리 및 저장
+        """
+        if not chunk_data:
+            return
+        
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chunk_filename = os.path.join(
+            self.data_folder,
+            f"kamco_auction_chunk_{chunk_number}_of_{total_chunks}_{current_time}.xlsx"
+        )
+        
+        self.save_data_to_excel(chunk_data, chunk_filename, is_backup=True)
+        print(f"\n청크 데이터 저장 완료: {chunk_filename} ({len(chunk_data):,}건)")
+
+    def merge_chunk_files(self):
+        """
+        청크 파일들을 하나로 병합
+        """
+        all_data = []
+        chunk_files = [f for f in os.listdir(self.data_folder) if f.startswith("kamco_auction_chunk_")]
+        
+        print("\n청크 파일 병합 중...")
+        for file in chunk_files:
+            file_path = os.path.join(self.data_folder, file)
+            try:
+                df = pd.read_excel(file_path)
+                all_data.append(df)
+                os.remove(file_path)  # 병합 후 청크 파일 삭제
+            except Exception as e:
+                print(f"파일 {file} 처리 중 오류 발생: {str(e)}")
+        
+        if all_data:
+            merged_data = pd.concat(all_data, ignore_index=True)
+            return merged_data.to_dict('records')
+        return []
+    
+    def get_all_items(self, disposal_method='0001', items_per_page=100, chunk_size=1000):
+        """
+        전체 공매물건 데이터 수집 (최적화된 버전)
+        """
+        try:
+            total_count = self.get_total_count(disposal_method)
+            print(f"\n전체 데이터 개수: {total_count:,}개")
+            
+            total_pages = (total_count + items_per_page - 1) // items_per_page
+            
+            # 페이지 정보 생성
+            page_infos = [(page, disposal_method, items_per_page) 
+                         for page in range(1, total_pages + 1)]
+            
+            # CPU 코어 수 제한 (4개만 사용)
+            num_processes = min(4, cpu_count())
+            print(f"\n{num_processes}개의 프로세스로 병렬 처리 시작")
+            
+            all_items = []
+            current_chunk = []
+            chunk_count = 0
+
+            # 오류 복구를 위한 재시도 횟수
+            max_retries = 3
+            
+            with Pool(processes=num_processes) as pool:
+                with tqdm(total=total_pages, desc="데이터 수집 중") as pbar:
+                    try:
+                        # imap 사용 (순차적 처리, 더 안정적)
+                        for items in pool.imap(self.fetch_page_data, page_infos):
+                            if items:
+                                all_items.extend(items)
+                                current_chunk.extend(items)
+                                
+                                # chunk_size에 도달하면 청크 저장
+                                if len(current_chunk) >= chunk_size:
+                                    try:
+                                        chunk_count += 1
+                                        self.process_chunk(
+                                            current_chunk, 
+                                            chunk_count, 
+                                            math.ceil(total_count / chunk_size)
+                                        )
+                                        # 성공적으로 저장된 후에만 청크 초기화
+                                        current_chunk = []
+                                    except Exception as e:
+                                        print(f"\n청크 저장 중 오류 발생: {str(e)}")
+                            
+                            pbar.update(1)  # 수정된 부분: pbar.update(1) 위치 이동
+                            # 중간 진행상황 저장
+                            if len(all_items) % (chunk_size * 5) == 0:
+                                try:
+                                    backup_filename = os.path.join(
+                                        self.backup_folder,
+                                        f"kamco_auction_backup_{len(all_items)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                    )
+                                    self.save_data_to_excel(all_items, backup_filename, is_backup=True)
+                                    print(f"\n중간 백업 완료: {backup_filename} (총 {len(all_items):,}건)")
+                                except Exception as e:
+                                    print(f"\n중간 백업 중 오류 발생: {str(e)}")
+                        
+                        pbar.update(1)
+                        pbar.set_postfix({'수집': f'{len(all_items):,}건'})
+                
+                    except KeyboardInterrupt:
+                        print("\n사용자에 의해 중단됨. 지금까지 수집된 데이터 저장 중...")
+                        # 중단 시점까지의 데이터 저장
+                        if all_items:
+                            try:
+                                interrupt_filename = os.path.join(
+                                    self.backup_folder,
+                                    f"kamco_auction_interrupted_{len(all_items)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                )
+                                self.save_data_to_excel(all_items, interrupt_filename, is_backup=True)
+                                print(f"\n중단 시점 데이터 저장 완료: {interrupt_filename}")
+                            except Exception as e:
+                                print(f"\n중단 데이터 저장 중 오류 발생: {str(e)}")
+                        raise
+                    
+                    except Exception as e:
+                        print(f"\n데이터 수집 중 오류 발생: {str(e)}")
+                        if all_items:
+                            try:
+                                error_filename = os.path.join(
+                                    self.backup_folder,
+                                    f"kamco_auction_error_{len(all_items)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                )
+                                self.save_data_to_excel(all_items, error_filename, is_backup=True)
+                                print(f"\n오류 발생 시점 데이터 저장 완료: {error_filename}")
+                            except Exception as save_error:
+                                print(f"\n오류 데이터 저장 실패: {str(save_error)}")
+                        raise
+        
+            # 남은 청크 처리
+            if current_chunk:
+                try:
+                    chunk_count += 1
+                    self.process_chunk(
+                        current_chunk, 
+                        chunk_count, 
+                        math.ceil(total_count / chunk_size)
+                    )
+                except Exception as e:
+                    print(f"\n최종 청크 저장 중 오류 발생: {str(e)}")
+            
+            # 최종 파일 저장
+            try:
+                final_filename = os.path.join(
+                    self.backup_folder,
+                    f"kamco_auction_full_{len(all_items)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                )
+                self.save_data_to_excel(all_items, final_filename, is_backup=True)
+                print(f"\n최종 데이터 저장 완료: {final_filename} (총 {len(all_items):,}건)")
+            except Exception as e:
+                print(f"\n최종 데이터 저장 중 오류 발생: {str(e)}")
+            
+            print(f"\n수집된 전체 데이터 개수: {len(all_items):,}개")
+            return all_items
+        
+        except Exception as e:
+            print(f"\n치명적 오류 발생: {str(e)}")
+            raise
+
+    def fetch_page_data(self, page_info):
+        """
+        단일 페이지 데이터 수집 (개선된 버전)
+        """
+        page_no, disposal_method, items_per_page = page_info
+        
+        for attempt in range(3):
+            try:
+                # API 호출 간격 증가 (2초)
+                time.sleep(2)
+                
+                items = self.get_auction_items(
+                    num_of_rows=items_per_page,
+                    page_no=page_no,
+                    disposal_method=disposal_method
+                )
+                return items
+            except Exception as e:
+                if attempt == 2:  # 마지막 시도
+                    print(f"\n페이지 {page_no} 처리 실패: {str(e)}")
+                    return []
+                time.sleep(5)  # 재시도 전 대기 시간 증가
+        return []
+
+def main():
+    try:
+        print("캠코 공매물건 조회 서비스 시작")
+        
+        service = KamcoAuctionService(SERVICE_KEY)
+        
+        # chunk_size를 조정하여 메모리 사용량과 성능 최적화
+        items = service.get_all_items(
+            items_per_page=100,  # API 호출당 데이터 수
+            chunk_size=1000      # 청크당 데이터 수
+        )
+        
+        print("\n프로그램 종료")
+        
+    except Exception as e:
+        print(f"\nError: {str(e)}")
+
+if __name__ == "__main__":
+    main()
