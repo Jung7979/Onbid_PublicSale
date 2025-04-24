@@ -25,7 +25,7 @@ if not SERVICE_KEY:
     print(".env 파일에 API_KEY_KAMCO_Decoding를 설정해주세요.")
     sys.exit(1)
 
-class getPublicSaleAnnouncement:
+class KamcoAuctionService:
     def __init__(self, service_key):
         self.base_url = "http://openapi.onbid.co.kr/openapi/services/KamcoPblsalThingInquireSvc"
         self.service_key = service_key
@@ -116,7 +116,7 @@ class getPublicSaleAnnouncement:
         # 일주일 전 날짜 계산
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
 
-        endpoint = f"{self.base_url}/getPublicSaleAnnouncement"
+        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
         params = {
             'serviceKey': self.service_key,
             'numOfRows': num_of_rows,
@@ -607,9 +607,9 @@ class getPublicSaleAnnouncement:
 
 def main():
     try:
-        print("이용기관 공고 목록 조회 서비스 시작")
+        print("캠코 공매물건 조회 서비스 시작")
         
-        service = getPublicSaleAnnouncement(SERVICE_KEY)
+        service = KamcoAuctionService(SERVICE_KEY)
         
         # chunk_size를 조정하여 메모리 사용량과 성능 최적화
         items = service.get_all_items(
