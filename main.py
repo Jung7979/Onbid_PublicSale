@@ -314,6 +314,21 @@ class KamcoAuctionService:
                             pass
                     adjusted_width = (max_length + 2)
                     worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
+
+                # 하이퍼링크 추가
+                for row in range(2, worksheet.max_row + 1):  # 2부터 시작 (헤더 제외)
+                    cltr_hstr_no = worksheet.cell(row=row, column=existing_columns.index('물건이력번호') + 1).value
+                    cltr_no = worksheet.cell(row=row, column=existing_columns.index('물건번호') + 1).value
+                    plnm_no = worksheet.cell(row=row, column=existing_columns.index('공고번호') + 1).value
+                    pbct_no = worksheet.cell(row=row, column=existing_columns.index('공매번호') + 1).value
+                    scrn_grp_cd = worksheet.cell(row=row, column=existing_columns.index('화면그룹코드') + 1).value
+                    pbct_cdtn_no = worksheet.cell(row=row, column=existing_columns.index('공매조건번호') + 1).value
+
+                    if all([cltr_hstr_no, cltr_no, plnm_no, pbct_no, scrn_grp_cd, pbct_cdtn_no]):
+                        url = f"https://www.onbid.co.kr/op/cta/cltrdtl/collateralDetailMoveableAssetsDetail.do?cltrHstrNo={cltr_hstr_no}&cltrNo={cltr_no}&plnmNo={plnm_no}&pbctNo={pbct_no}&scrnGrpCd={scrn_grp_cd}&pbctCdtnNo={pbct_cdtn_no}"
+                        cell = worksheet.cell(row=row, column=existing_columns.index('물건관리번호') + 1)
+                        cell.hyperlink = url
+                        cell.font = Font(color="0000FF", underline="single")
             
             print(f"파일 저장 완료: {abs_filename}")
             
