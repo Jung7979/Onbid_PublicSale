@@ -15,6 +15,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side
 from openpyxl.styles import Alignment
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import re
 
 # .env 파일 로드
 load_dotenv()
@@ -242,8 +243,63 @@ class KamcoAuctionService:
             abs_filename = os.path.abspath(filename)
             print(f"파일 저장 시도: {abs_filename}")
             
-            df = pd.DataFrame(items)
-
+            # DataFrame 생성 전에 숫자 데이터 처리 및 주소 정보 추출
+            for item in items:
+                if '감정가' in item and item['감정가']:
+                    try:
+                        item['감정가'] = int(item['감정가'].replace(',', ''))
+                    except:
+                        pass
+                if '최저입찰가' in item and item['최저입찰가']:
+                    try:
+                        item['최저입찰가'] = int(item['최저입찰가'].replace(',', ''))
+                    except:
+                        pass
+                
+                # 주거용건물인 경우 동, 층, 호 정보 추출
+                if '용도명' in item and item['용도명'] and item['용도명'].startswith('주거용건물'):
+                    address = item.get('물건소재지(지번)', '') or item.get('물건소재지(도로명)', '')
+                    
+                    # 동 정보 추출 (101동, 가동, 에이동 등)
+                    dong = ''
+                    dong_patterns = [
+                        r'(\d+동)',  # 101동
+                        r'([가-힣]동)',  # 가동
+                        r'([A-Z]동)',  # A동
+                        r'([가-힣]+동)',  # 에이동
+                        r'([가-힣]+타워)',  # 에이타워
+                        r'([가-힣]+빌딩)'  # 에이빌딩
+                    ]
+                    for pattern in dong_patterns:
+                        match = re.search(pattern, address)
+                        if match:
+                            dong = match.group(1)
+                            break
+                    
+                    # 층 정보 추출
+                    floor = ''
+                    floor_match = re.search(r'(\d+)층', address)
+                    if floor_match:
+                        floor = floor_match.group(1)
+                    
+                    # 호 정보 추출
+                    ho = ''
+                    ho_patterns = [
+                        r'(\d+)호',  # 101호
+                        r'(\d+-\d+)호',  # 101-101호
+                        r'(\d+-\d+-\d+)호'  # 101-101-101호
+                    ]
+                    for pattern in ho_patterns:
+                        match = re.search(pattern, address)
+                        if match:
+                            ho = match.group(1)
+                            break
+                    
+                    # 추출된 정보 저장
+                    item['동'] = dong
+                    item['층'] = floor
+                    item['호'] = ho
+            
             # 헤더 순서 정의
             columns_order = [
                 '순번',
@@ -253,42 +309,43 @@ class KamcoAuctionService:
                 '물건소재지(지번)',
                 '지번PNU',
                 '물건소재지(도로명)',
+                '동', '층', '호',
                 '입찰방식명',
                 '감정가',
                 '최저입찰가',
                 '최저입찰가율',
+                '하우스머치', '부동산플래닛', '파이퍼',
                 '입찰시작일시',
                 '입찰마감일시',
-                '물건상태',
-                '유찰횟수',
-                '조회수',
-                '물건상세정보',
-                '공고번호',
-                '공매번호',
-                '공매조건번호',
-                '물건번호',
-                '물건이력번호',
-                '화면그룹코드',
-                '입찰번호',
-                '처분방식코드',
-                '처분방식코드명',
-                '제조사',
-                '모델',
-                '연월식',
-                '변속기',
-                '배기량',
-                '주행거리',
-                '연료',
-                '법인명',
-                '업종',
-                '종목명',
-                '회원권명',
-                '물건 이미지'
+                '물건상태'
+                # '유찰횟수',
+                # '조회수',
+                # '물건상세정보',
+                # '공고번호',
+                # '공매번호',
+                # '공매조건번호',
+                # '물건번호',
+                # '물건이력번호',
+                # '화면그룹코드',
+                # '입찰번호',
+                # '처분방식코드',
+                # '처분방식코드명',
+                # '제조사',
+                # '모델',
+                # '연월식',
+                # '변속기',
+                # '배기량',
+                # '주행거리',
+                # '연료',
+                # '법인명',
+                # '업종',
+                # '종목명',
+                # '회원권명',
+                # '물건 이미지'
             ]
             
-            # 존재하는 컬럼만 선택하고 순서대로 정렬
-            existing_columns = [col for col in columns_order if col in df.columns]
-            df = df[existing_columns]
+            # DataFrame 생성 시 컬럼 순서 유지
+            df = pd.DataFrame(items, columns=columns_order)
             
             # 엑셀 파일 생성
             with pd.ExcelWriter(abs_filename, engine='openpyxl') as writer:
@@ -302,18 +359,58 @@ class KamcoAuctionService:
                     for cell in row:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                # 열 너비 자동 조정
+                # 열 너비 자동 조정 (최대 너비 50으로 제한)
                 for column in worksheet.columns:
                     max_length = 0
                     column = list(column)
                     for cell in column:
                         try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
+                            # 셀 값의 길이 계산 (한글은 2로 계산)
+                            cell_length = sum(2 if '\u4e00' <= char <= '\u9fff' else 1 for char in str(cell.value))
+                            if cell_length > max_length:
+                                max_length = cell_length
                         except:
                             pass
-                    adjusted_width = (max_length + 2)
+                    # 최대 너비 50으로 제한
+                    adjusted_width = min(max_length + 2, 50)
                     worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
+
+                # 하이퍼링크 추가
+                for row in range(2, worksheet.max_row + 1):  # 2부터 시작 (헤더 제외)
+                    cltr_hstr_no = worksheet.cell(row=row, column=columns_order.index('물건이력번호') + 1).value
+                    cltr_no = worksheet.cell(row=row, column=columns_order.index('물건번호') + 1).value
+                    plnm_no = worksheet.cell(row=row, column=columns_order.index('공고번호') + 1).value
+                    pbct_no = worksheet.cell(row=row, column=columns_order.index('공매번호') + 1).value
+                    scrn_grp_cd = worksheet.cell(row=row, column=columns_order.index('화면그룹코드') + 1).value
+                    pbct_cdtn_no = worksheet.cell(row=row, column=columns_order.index('공매조건번호') + 1).value
+
+                    if all([cltr_hstr_no, cltr_no, plnm_no, pbct_no, scrn_grp_cd, pbct_cdtn_no]):
+                        url = f"https://www.onbid.co.kr/op/cta/cltrdtl/collateralDetailMoveableAssetsDetail.do?cltrHstrNo={cltr_hstr_no}&cltrNo={cltr_no}&plnmNo={plnm_no}&pbctNo={pbct_no}&scrnGrpCd={scrn_grp_cd}&pbctCdtnNo={pbct_cdtn_no}"
+                        cell = worksheet.cell(row=row, column=columns_order.index('물건관리번호') + 1)
+                        cell.hyperlink = url
+                        cell.font = Font(color="0000FF", underline="single")
+
+                # 숫자 서식 적용 (천단위 구분자 및 오른쪽 정렬)
+                for row in range(2, worksheet.max_row + 1):
+                    # 감정가 열
+                    cell = worksheet.cell(row=row, column=columns_order.index('감정가') + 1)
+                    if cell.value is not None:
+                        try:
+                            cell.value = int(cell.value)
+                            cell.number_format = '#,##0'
+                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                        except:
+                            pass
+                    
+                    # 최저입찰가 열
+                    cell = worksheet.cell(row=row, column=columns_order.index('최저입찰가') + 1)
+                    if cell.value is not None:
+                        try:
+                            cell.value = int(cell.value)
+                            cell.number_format = '#,##0'
+                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                        except:
+                            pass
             
             print(f"파일 저장 완료: {abs_filename}")
             
