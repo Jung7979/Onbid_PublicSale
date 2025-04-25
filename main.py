@@ -27,21 +27,22 @@ if not SERVICE_KEY:
 
 class KamcoAuctionService:
     def __init__(self, service_key):
-        self.base_url = "http://openapi.onbid.co.kr/openapi/services/KamcoPblsalThingInquireSvc"
+        self.base_url = "http://openapi.onbid.co.kr/openapi/services/UtlinsttPblsalThingInquireSvc"
         self.service_key = service_key
-        self.backup_folder = "backup"
+        self.backup_folder = os.path.join(os.getcwd(), "backup")
         self.data_folder = os.path.join(self.backup_folder, "data")
         
         # 폴더 생성
         for folder in [self.backup_folder, self.data_folder]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
+                print(f"폴더 생성: {folder}")
 
     def get_total_count(self, disposal_method='0001'):
         """
         전체 데이터 개수 조회
         """
-        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        endpoint = f"{self.base_url}/getPublicSaleObject"
         params = {
             'serviceKey': self.service_key,
             'numOfRows': 1,
@@ -78,7 +79,7 @@ class KamcoAuctionService:
         # 일주일 전 날짜 계산
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
         
-        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        endpoint = f"{self.base_url}/getPublicSaleObject"
         params = {
             'serviceKey': self.service_key,
             'numOfRows': 1,
@@ -116,7 +117,7 @@ class KamcoAuctionService:
         # 일주일 전 날짜 계산
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
 
-        endpoint = f"{self.base_url}/getKamcoPbctCltrList"
+        endpoint = f"{self.base_url}/getPublicSaleObject"
         params = {
             'serviceKey': self.service_key,
             'numOfRows': num_of_rows,
@@ -230,233 +231,148 @@ class KamcoAuctionService:
 
     def save_data_to_excel(self, items, filename, is_backup=False):
         """
-        데이터를 엑셀 파일로 저장 (물건관리번호에 하이퍼링크 추가)
+        데이터를 엑셀 파일로 저장
         """
         if not items:
+            print("저장할 데이터가 없습니다.")
             return
             
-        df = pd.DataFrame(items)
-
-        # 수정된 컬럼 순서 정의 (한글)
-        columns_order = [
-            '순번',
-            '물건관리번호',
-            '용도명',
-            '물건명',
-            '입찰방식명',
-            '감정가',
-            '최저입찰가',
-            '최저입찰가율',
-            '입찰시작일시',
-            '입찰마감일시',
-            '물건상태',
-            '유찰횟수',
-            '조회수',
-            '물건상세정보',
-            '공고번호',
-            '공매번호',
-            '공매조건번호',
-            '물건번호',
-            '물건이력번호',
-            '화면그룹코드',
-            '입찰번호',
-            '물건소재지(지번)',
-            '물건소재지(도로명)',
-            '지번PNU',
-            '처분방식코드',
-            '처분방식코드명',
-            '제조사',
-            '모델',
-            '연월식',
-            '변속기',
-            '배기량',
-            '주행거리',
-            '연료',
-            '법인명',
-            '업종',
-            '종목명',
-            '회원권명',
-            '물건 이미지'
-        ]
-        
-        # 존재하는 컬럼만 선택
-        existing_columns = [col for col in columns_order if col in df.columns]
-        df = df[existing_columns]
-
         try:
-            # 숫자형 데이터 변환
-            numeric_columns = [
-                '순번', '공고번호', '공매번호', '공매조건번호', '물건번호', '물건이력번호',
-                '최저입찰가', '감정가', '유찰횟수', '조회수',
-                '배기량', '주행거리'
+            # 절대 경로로 변환
+            abs_filename = os.path.abspath(filename)
+            print(f"파일 저장 시도: {abs_filename}")
+            
+            df = pd.DataFrame(items)
+
+            # 헤더 순서 정의
+            columns_order = [
+                '순번',
+                '물건관리번호',
+                '용도명',
+                '물건명',
+                '물건소재지(지번)',
+                '지번PNU',
+                '물건소재지(도로명)',
+                '입찰방식명',
+                '감정가',
+                '최저입찰가',
+                '최저입찰가율',
+                '입찰시작일시',
+                '입찰마감일시',
+                '물건상태',
+                '유찰횟수',
+                '조회수',
+                '물건상세정보',
+                '공고번호',
+                '공매번호',
+                '공매조건번호',
+                '물건번호',
+                '물건이력번호',
+                '화면그룹코드',
+                '입찰번호',
+                '처분방식코드',
+                '처분방식코드명',
+                '제조사',
+                '모델',
+                '연월식',
+                '변속기',
+                '배기량',
+                '주행거리',
+                '연료',
+                '법인명',
+                '업종',
+                '종목명',
+                '회원권명',
+                '물건 이미지'
             ]
-            for col in numeric_columns:
-                if col in df.columns:
-                    try:
-                        # 쉼표 제거 후 숫자로 변환
-                        df[col] = df[col].str.replace(',', '').astype(float)
-                    except:
-                        pass
-
-            # 날짜형 데이터 변환
-            date_columns = ['입찰시작일시', '입찰마감일시']
-            for col in date_columns:
-                if col in df.columns:
-                    try:
-                        df[col] = pd.to_datetime(df[col], format='%Y%m%d%H%M%S')
-                    except:
-                        pass
-
-            # 데이터프레임 형식 처리
-            df['최저입찰가율'] = df['최저입찰가율'].str.extract(r'(\d+)').astype(float) / 100  # (70%) -> 0.70
-
+            
+            # 존재하는 컬럼만 선택하고 순서대로 정렬
+            existing_columns = [col for col in columns_order if col in df.columns]
+            df = df[existing_columns]
+            
             # 엑셀 파일 생성
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            with pd.ExcelWriter(abs_filename, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='공매물건목록')
-                    
+                
                 # 워크시트 가져오기
                 worksheet = writer.sheets['공매물건목록']
-
-                # 표 스타일 설정
-                data_range = worksheet.dimensions
-                table = openpyxl.worksheet.table.Table(
-                    displayName="AuctionTable",
-                    ref=data_range,
-                    tableStyleInfo=openpyxl.worksheet.table.TableStyleInfo(
-                        name="TableStyleMedium4",
-                        showFirstColumn=False,
-                        showLastColumn=False,
-                        showRowStripes=True,
-                        showColumnStripes=False
-                    )
-                )
-                worksheet.add_table(table)
-
-                # 숫자 형식 설정 (천단위 구분)
-                number_format = '#,##0'
-                number_columns = {'감정가': 'F', '최저입찰가': 'G', '유찰횟수': 'L', '조회수': 'M'}
-                for col_name, col_letter in number_columns.items():
-                    for row in range(2, worksheet.max_row + 1):
-                        cell = worksheet[f'{col_letter}{row}']
-                        cell.number_format = number_format
-
-                # 백분율 형식 설정
-                for row in range(2, worksheet.max_row + 1):
-                    cell = worksheet[f'H{row}']  # 최저입찰가율 (H열)
-                    cell.number_format = '0%'
-
-                # 날짜 형식 설정
-                date_format = 'yyyy-mm-dd hh:mm'
-                date_columns = {'입찰시작일시': 'I', '입찰마감일시': 'J'}
-                for col_name, col_letter in date_columns.items():
-                    for row in range(2, worksheet.max_row + 1):
-                        cell = worksheet[f'{col_letter}{row}']
-                        cell.number_format = date_format
                 
-                # 열 너비 자동 조정 및 스타일 설정
-                for idx, column in enumerate(worksheet.columns):
+                # 스타일 설정
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # 열 너비 자동 조정
+                for column in worksheet.columns:
                     max_length = 0
                     column = list(column)
-                    
-                    # 헤더 셀 스타일 설정 (1행만 가운데 정렬)
-                    header_cell = column[0]
-                    header_cell.font = openpyxl.styles.Font(bold=True)
-                    header_cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
-        
-                
-                    # 열 너비 계산
                     for cell in column:
                         try:
                             if len(str(cell.value)) > max_length:
                                 max_length = len(str(cell.value))
                         except:
                             pass
-                                
-                    actual_width = min((max_length + 2), 50)  # 최대 너비 제한
-                    worksheet.column_dimensions[column[0].column_letter].width = actual_width
+                    adjusted_width = (max_length + 2)
+                    worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
             
-                    
-                    # 최대 너비를 초과하는 경우 해당 열의 데이터 행에만 '셀에 맞춤' 적용
-                    if max_length > 50:
-                        for cell in column[1:]:  # 헤더 제외
-                            cell.alignment = openpyxl.styles.Alignment(
-                                shrink_to_fit=True,  # 셀에 맞춤
-                                vertical='center'     # 수직 중앙 정렬
-                            )
-
-                # 하이퍼링크 추가 - with 문 안으로 이동
-                for row_idx, row in enumerate(df.itertuples(), start=2):
-                    try:
-                        cltr_hstr_no = str(getattr(row, '물건이력번호', ''))
-                        cltr_no = str(getattr(row, '물건번호', ''))
-                        plnm_no = str(getattr(row, '공고번호', ''))
-                        pbct_no = str(getattr(row, '공매번호', ''))
-                        scrn_grp_cd = str(getattr(row, '화면그룹코드', '0001'))
-                        pbct_cdtn_no = str(getattr(row, '공매조건번호', ''))
-                        
-                        url = f'https://www.onbid.co.kr/op/cta/cltrdtl/collateralRealEstateDetail.do?cltrHstrNo={cltr_hstr_no}&cltrNo={cltr_no}&plnmNo={plnm_no}&pbctNo={pbct_no}&scrnGrpCd={scrn_grp_cd}&pbctCdtnNo={pbct_cdtn_no}'
-                        
-                        cell = worksheet.cell(row=row_idx, column=2)  # B열
-                        cell.hyperlink = url
-                        cell.style = 'Hyperlink'
-                    except Exception as e:
-                        pass  # 하이퍼링크 생성 오류 메시지 출력 제거
-
-                # 테두리 설정 - with 문 안으로 이동
-                thin_border = openpyxl.styles.Border(
-                    left=openpyxl.styles.Side(style='thin'),
-                    right=openpyxl.styles.Side(style='thin'),
-                    top=openpyxl.styles.Side(style='thin'),
-                    bottom=openpyxl.styles.Side(style='thin')
-                )
-                
-                for row in worksheet.iter_rows():
-                    for cell in row:
-                        cell.border = thin_border
-
-            if not is_backup:
-                pass  # 데이터 저장 완료 메시지 출력 제거
-                
+            print(f"파일 저장 완료: {abs_filename}")
+            
         except Exception as e:
-            pass  # 파일 저장 오류 메시지 출력 제거
+            print(f"파일 저장 중 오류 발생: {str(e)}")
+            raise
 
     def process_chunk(self, chunk_data, chunk_number, total_chunks):
         """
         데이터 청크 처리 및 저장
         """
         if not chunk_data:
+            print(f"청크 {chunk_number}에 데이터가 없습니다.")
             return
         
-        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        chunk_filename = os.path.join(
-            self.data_folder,
-            f"kamco_auction_chunk_{chunk_number}_of_{total_chunks}_{current_time}.xlsx"
-        )
-        
-        self.save_data_to_excel(chunk_data, chunk_filename, is_backup=True)
-        print(f"\n청크 데이터 저장 완료: {chunk_filename} ({len(chunk_data):,}건)")
+        try:
+            current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            chunk_filename = os.path.join(
+                self.data_folder,
+                f"kamco_auction_chunk_{chunk_number}_of_{total_chunks}_{current_time}.xlsx"
+            )
+            
+            print(f"청크 데이터 저장 시도: {chunk_filename}")
+            self.save_data_to_excel(chunk_data, chunk_filename, is_backup=True)
+            print(f"청크 데이터 저장 완료: {chunk_filename} ({len(chunk_data):,}건)")
+            
+        except Exception as e:
+            print(f"청크 저장 중 오류 발생: {str(e)}")
+            raise
 
     def merge_chunk_files(self):
         """
         청크 파일들을 하나로 병합
         """
-        all_data = []
-        chunk_files = [f for f in os.listdir(self.data_folder) if f.startswith("kamco_auction_chunk_")]
-        
-        print("\n청크 파일 병합 중...")
-        for file in chunk_files:
-            file_path = os.path.join(self.data_folder, file)
-            try:
-                df = pd.read_excel(file_path)
-                all_data.append(df)
-                os.remove(file_path)  # 병합 후 청크 파일 삭제
-            except Exception as e:
-                print(f"파일 {file} 처리 중 오류 발생: {str(e)}")
-        
-        if all_data:
-            merged_data = pd.concat(all_data, ignore_index=True)
-            return merged_data.to_dict('records')
-        return []
+        try:
+            all_data = []
+            chunk_files = [f for f in os.listdir(self.data_folder) if f.startswith("kamco_auction_chunk_")]
+            
+            print(f"\n병합할 청크 파일 수: {len(chunk_files)}")
+            
+            for file in chunk_files:
+                file_path = os.path.join(self.data_folder, file)
+                print(f"파일 처리 중: {file_path}")
+                
+                try:
+                    df = pd.read_excel(file_path)
+                    all_data.append(df)
+                    print(f"파일 처리 완료: {file_path}")
+                except Exception as e:
+                    print(f"파일 처리 중 오류 발생: {file_path} - {str(e)}")
+            
+            if all_data:
+                merged_data = pd.concat(all_data, ignore_index=True)
+                return merged_data.to_dict('records')
+            return []
+            
+        except Exception as e:
+            print(f"청크 파일 병합 중 오류 발생: {str(e)}")
+            raise
     
     def get_all_items(self, disposal_method='0001', items_per_page=100, chunk_size=1000):
         """
@@ -607,7 +523,7 @@ class KamcoAuctionService:
 
 def main():
     try:
-        print("캠코 공매물건 조회 서비스 시작")
+        print("이용기관 공고 목록 조회 서비스 시작")
         
         service = KamcoAuctionService(SERVICE_KEY)
         
